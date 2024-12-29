@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from minisom import MiniSom
 from sklearn.neural_network import MLPClassifier
 
@@ -9,7 +10,7 @@ class SOEDClassifier:
                  mlp_max_iter=200, mlp_tol=1e-4, mlp_verbose=False,
                  mlp_warm_start=False, mlp_n_iter_no_change=10, mlp_beta_1=0.9, mlp_beta_2=0.999, mlp_epsilon=1e-8,
                  som_x=10, som_y=10, som_input_len=None, som_sigma=1.0, som_learning_rate=0.5,
-                 som_decay_function=None, som_neighborhood_function='gaussian',
+                 som_decay_function=None, som_neighborhood_function='gaussian', som_n_iter = 100,
                  random_state =None):
         """
         Custom Multi-Layer Perceptron (MLP) Classifier with MiniSOM for feature transformation.
@@ -40,6 +41,8 @@ class SOEDClassifier:
             - som_decay_function: callable or None, default=None
             - som_neighborhood_function: {'gaussian', 'mexican_hat'}, default='gaussian'
         """
+
+        assert type(som_input_len)==int, 'som_input_len needs to be integer.'
         self.mlp_hidden_layer_sizes = mlp_hidden_layer_sizes
         self.mlp_activation = mlp_activation
         self.mlp_solver = mlp_solver
@@ -58,12 +61,16 @@ class SOEDClassifier:
 
         self.som_x = som_x
         self.som_y = som_y
-        self.som_input_len = som_input_len
+        self.som_input_len = som_input_len + 3
         self.som_sigma = som_sigma
         self.som_learning_rate = som_learning_rate
         self.som_decay_function = som_decay_function
         self.som_neighborhood_function = som_neighborhood_function
         self.som_random_seed = random_state
+        self.som_n_iter = som_n_iter
+
+        #if self.som_random_seed is None:
+        #    self.som_random_seed = np.random.randint(1000000)
 
         self.mlp = MLPClassifier(hidden_layer_sizes=self.mlp_hidden_layer_sizes, activation=self.mlp_activation,
                                  solver=self.mlp_solver, alpha=self.mlp_alpha, batch_size=self.mlp_batch_size,
@@ -73,7 +80,7 @@ class SOEDClassifier:
                                  beta_1=self.mlp_beta_1, beta_2=self.mlp_beta_2, epsilon=self.mlp_epsilon)
 
         self.som = MiniSom(self.som_x, self.som_y, self.som_input_len, sigma=self.som_sigma,
-                           learning_rate=self.som_learning_rate, decay_function=self.som_decay_function,
+                           learning_rate=self.som_learning_rate,
                            neighborhood_function=self.som_neighborhood_function, random_seed=self.som_random_seed)
 
         self.is_fitted = False
@@ -104,13 +111,19 @@ class SOEDClassifier:
         assert np.isin(y, [0, 1]).all(), 'y can only have binary values.'
 
         _continue = True
-        _multiplier = 1
+        _multiplier = 0.5
         while _continue:
             X_som = np.column_stack((X, y*_multiplier,c*_multiplier))
-            _multiplier += 0.5
 
             # Train the MiniSom
-            self.som.train_random(X_som, 100)
+            self.som.train(X_som, self.som_n_iter)
+            winner_coordinates = np.array([self.som.winner(x) for x in X_som])
+            df = pd.DataFrame(np.column_stack((winner_coordinates,y)),columns=['X','Y','L'])
+            pure_df = df.groupby(['X','Y','L']).size().unstack()
+            is_pure = all(pure_df.loc[r].nunique(dropna=True) <= 1 for r in pure_df.index)
+
+            _continue = not is_pure
+            _multiplier += 0.25
 
         # Transform features using MiniSom
         X_transformed = np.array([self.som.winner(x) for x in X])
