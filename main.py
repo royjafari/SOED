@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from minisom import MiniSom
-from sklearn.neural_network import MLPClassifier
+from sklearn.neural_network import MLPRegressor
 
 class SOEDClassifier:
     def __init__(self, 
@@ -11,7 +11,7 @@ class SOEDClassifier:
                  mlp_warm_start=False, mlp_n_iter_no_change=10, mlp_beta_1=0.9, mlp_beta_2=0.999, mlp_epsilon=1e-8,
                  som_x=10, som_y=10, som_input_len=None, som_sigma=1.0, som_learning_rate=0.5,
                  som_decay_function=None, som_neighborhood_function='gaussian', som_n_iter = 100,
-                 random_state =None):
+                 random_state =None, soed_tune_percent=0.5):
         """
         Custom Multi-Layer Perceptron (MLP) Classifier with MiniSOM for feature transformation.
 
@@ -69,10 +69,12 @@ class SOEDClassifier:
         self.som_random_seed = random_state
         self.som_n_iter = som_n_iter
 
+        self.seod_tune_percent = soed_tune_percent
+
         #if self.som_random_seed is None:
         #    self.som_random_seed = np.random.randint(1000000)
 
-        self.mlp = MLPClassifier(hidden_layer_sizes=self.mlp_hidden_layer_sizes, activation=self.mlp_activation,
+        self.mlp = MLPRegressor(hidden_layer_sizes=self.mlp_hidden_layer_sizes, activation=self.mlp_activation,
                                  solver=self.mlp_solver, alpha=self.mlp_alpha, batch_size=self.mlp_batch_size,
                                  learning_rate=self.mlp_learning_rate, max_iter=self.mlp_max_iter,
                                  random_state=self.mlp_random_state, tol=self.mlp_tol, verbose=self.mlp_verbose,
@@ -118,18 +120,52 @@ class SOEDClassifier:
             # Train the MiniSom
             self.som.train(X_som, self.som_n_iter)
             winner_coordinates = np.array([self.som.winner(x) for x in X_som])
-            df = pd.DataFrame(np.column_stack((winner_coordinates,y)),columns=['X','Y','L'])
+            df = pd.DataFrame(np.column_stack((winner_coordinates,y,c)),columns=['X','Y','L','C0','C1'])
             pure_df = df.groupby(['X','Y','L']).size().unstack()
             is_pure = all(pure_df.loc[r].nunique(dropna=True) <= 1 for r in pure_df.index)
 
             _continue = not is_pure
             _multiplier += 0.25
 
-        # Transform features using MiniSom
-        X_transformed = np.array([self.som.winner(x) for x in X])
+        y_mlp = (df[['X','Y']]+.5).values
+
+        random_index = np.random.permutation(X.shape[0])
+        i = int(round(X.shape[0]*self.seod_tune_percent))
+        train_index = random_index[:i]
+        tune_index = random_index[i+1:]
+
+        X_train = X[train_index]
+        y_mlp_train = y_mlp[train_index]
+        y_train = y[train_index]
+        c_train = c[train_index]
+
+        X_tune = X[tune_index]
+        y_mlp_tune = y_mlp[tune_index]
+        y_tune = y[tune_index]
+        c_tune = c[tune_index]
+
 
         # Train the MLPClassifier
-        self.mlp.fit(X_transformed, y)
+        self.mlp.fit(X_train, y_mlp_train)
+        tune_raw_predict = self.mlp.predict(X)
+        tune_predict = (tune_raw_predict-0.5).round(0)
+        tune_predict = np.where(tune_predict<0,0,tune_predict)
+        tune_predict[:,0] = np.where(tune_predict[:,0]>self.som_x-1,0,tune_predict[:,0])
+        tune_predict[:,1] = np.where(tune_predict[:,0]>self.som_y-1,0,tune_predict[:,1])
+
+        cost_df = pd.DataFrame(np.column_stack((tune_predict,y,c)),columns=['X','Y','L','C0','C1'])
+        cost_df['Cost_0'] = np.where(cost_df.L == 0.0,0.0,cost_df.C0)
+        cost_df['Cost_1'] = np.where(cost_df.L == 1.0,0.0,cost_df.C1)
+
+        decide_df = cost_df.groupby(['X','Y'])[['Cost_0','Cost_1']].sum()
+        decide_df = (decide_df.Cost_1<decide_df.Cost_0).rename('class').reset_index().replace({True:1,False:0})
+
+        prob_df = cost_df.groupby(['X','Y','L']).size().unstack().fillna(0.0)
+        sum_sr = prob_df.sum(axis=1)
+
+        prob_df[0.0] = prob_df[0.0] / sum_sr
+        prob_df[1.0] = prob_df[1.0] / sum_sr
+
         self.is_fitted = True
         print("Model training complete.")
         return self
@@ -148,7 +184,7 @@ class SOEDClassifier:
         """
         if not self.is_fitted:
             raise ValueError("The model has not been fitted yet.")
-        
+
         # Transform features using MiniSom
         X_transformed = np.array([self.som.winner(x) for x in X])
 
