@@ -3,6 +3,38 @@ import pandas as pd
 from minisom import MiniSom
 from sklearn.neural_network import MLPRegressor
 
+def fill_nan_with_weighted_neighbors(matrix):
+        # Create a padded version of the matrix to handle edges
+        padded_matrix = np.pad(matrix, pad_width=1, mode='constant', constant_values=np.nan)
+        rows, cols = matrix.shape
+
+        # Initialize an output matrix
+        filled_matrix = matrix.copy()
+
+        # Define the weights for the 3x3 neighborhood
+        weights = np.array([
+            [0.5, 1.0, 0.5],  # Top row: Diagonal, Direct, Diagonal
+            [1.0, 0.0, 1.0],  # Middle row: Direct, Center, Direct
+            [0.5, 1.0, 0.5]   # Bottom row: Diagonal, Direct, Diagonal
+        ])
+
+        # Iterate over each cell in the original matrix
+        for i in range(rows):
+            for j in range(cols):
+                if np.isnan(matrix[i, j]):  # Only process NaN values
+                    # Extract the 3x3 neighborhood
+                    neighborhood = padded_matrix[i:i+3, j:j+3]
+
+                    # Apply weights and mask valid neighbors
+                    weighted_values = neighborhood * weights
+                    valid_mask = ~np.isnan(weighted_values)
+
+                    # Calculate the weighted average of valid neighbors
+                    if np.any(valid_mask):
+                        filled_matrix[i, j] = np.sum(weighted_values[valid_mask]) / np.sum(weights[valid_mask])
+
+        return filled_matrix
+
 class SOEDClassifier:
     def __init__(self, 
                  mlp_hidden_layer_sizes=(100,), mlp_activation='relu', mlp_solver='adam',
@@ -113,8 +145,9 @@ class SOEDClassifier:
         assert np.isin(y, [0, 1]).all(), 'y can only have binary values.'
 
         _continue = True
-        _multiplier = 0.5
+        _multiplier = 0
         while _continue:
+            _multiplier += 0.25
             X_som = np.column_stack((X, y*_multiplier,c*_multiplier))
 
             # Train the MiniSom
@@ -125,7 +158,30 @@ class SOEDClassifier:
             is_pure = all(pure_df.loc[r].nunique(dropna=True) <= 1 for r in pure_df.index)
 
             _continue = not is_pure
-            _multiplier += 0.25
+
+        som_cost_df = df.copy(deep=True)
+        som_cost_df['Cost_0'] = np.where(som_cost_df.L == 0.0,0.0,som_cost_df.C0)
+        som_cost_df['Cost_1'] = np.where(som_cost_df.L == 1.0,0.0,som_cost_df.C1)
+
+        som_cost_df = som_cost_df.groupby(['X','Y'])[['Cost_0','Cost_1']].sum()
+        cost_matrix_df = (som_cost_df.Cost_1 - som_cost_df.Cost_0).unstack()
+
+        while cost_matrix_df.isna().sum().sum() >0:
+            cost_matrix_df.loc[:,:]=fill_nan_with_weighted_neighbors(cost_matrix_df.values)
+        som_cost_sr = cost_matrix_df.stack().sort_index().rename('cost')
+        som_decide_sr = pd.Series(np.where(som_cost_sr<0,1,0),index = som_cost_sr.index)
+
+        som_prob_df = df.groupby(['X','Y','L']).size().unstack().fillna(0.0)
+        som_prob_0_df = som_prob_df[0.0].unstack()
+        som_prob_1_df = som_prob_df[1.0].unstack()
+
+        while som_prob_0_df.isna().sum().sum()>0:
+            som_prob_0_df.loc[:,:]=fill_nan_with_weighted_neighbors(som_prob_0_df.values)
+
+        while som_prob_1_df.isna().sum().sum()>0:
+            som_prob_1_df.loc[:,:]=fill_nan_with_weighted_neighbors(som_prob_1_df.values)
+
+        som_prob_sr = (som_prob_1_df/ (som_prob_1_df + som_prob_0_df)).stack()
 
         y_mlp = (df[['X','Y']]+.5).values
 
@@ -153,9 +209,36 @@ class SOEDClassifier:
         tune_predict[:,0] = np.where(tune_predict[:,0]>self.som_x-1,0,tune_predict[:,0])
         tune_predict[:,1] = np.where(tune_predict[:,0]>self.som_y-1,0,tune_predict[:,1])
 
+        df = pd.DataFrame(np.column_stack((tune_predict,y,c)),columns=['X','Y','L','C0','C1'])
+
+        mlp_cost_df = df.copy(deep=True)
+        mlp_cost_df['Cost_0'] = np.where(mlp_cost_df.L == 0.0,0.0,mlp_cost_df.C0)
+        mlp_cost_df['Cost_1'] = np.where(mlp_cost_df.L == 1.0,0.0,mlp_cost_df.C1)
+
+        mlp_cost_df = mlp_cost_df.groupby(['X','Y'])[['Cost_0','Cost_1']].sum()
+
+        mlp_cost_0_df = mlp_cost_df['Cost_0'].unstack()
+        mlp_cost_1_df = mlp_cost_df['Cost_1'].unstack()
+
+        while mlp_cost_0_df.isna().sum().sum()>0:
+            mlp_cost_0_df.loc[:,:]=fill_nan_with_weighted_neighbors(mlp_cost_0_df.values)
+
+        while mlp_cost_1_df.isna().sum().sum()>0:
+            mlp_cost_1_df.loc[:,:]=fill_nan_with_weighted_neighbors(mlp_cost_1_df.values)
+
+        som_prob_sr = (som_prob_1_df/ (som_prob_1_df + som_prob_0_df)).stack()
+
+
+
+
+        cost_matrix_df = (mlp_cost_df.Cost_1 - mlp_cost_df.Cost_0).unstack()
+        while cost_matrix_df.isna().sum().sum() >0:
+            cost_matrix_df.loc[:,:]=fill_nan_with_weighted_neighbors(cost_matrix_df.values)
+
         cost_df = pd.DataFrame(np.column_stack((tune_predict,y,c)),columns=['X','Y','L','C0','C1'])
         cost_df['Cost_0'] = np.where(cost_df.L == 0.0,0.0,cost_df.C0)
         cost_df['Cost_1'] = np.where(cost_df.L == 1.0,0.0,cost_df.C1)
+
 
         decide_df = cost_df.groupby(['X','Y'])[['Cost_0','Cost_1']].sum()
         decide_df = (decide_df.Cost_1<decide_df.Cost_0).rename('class').reset_index().replace({True:1,False:0})
