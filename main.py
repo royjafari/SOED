@@ -82,8 +82,8 @@ class SOEDClassifier:
                  mlp_alpha=0.0001, mlp_batch_size='auto', mlp_learning_rate='constant',
                  mlp_max_iter=200, mlp_tol=1e-4, mlp_verbose=False,
                  mlp_warm_start=False, mlp_n_iter_no_change=10, mlp_beta_1=0.9, mlp_beta_2=0.999, mlp_epsilon=1e-8,
-                 som_x=10, som_y=10, som_input_len=None, som_sigma=1.0, som_learning_rate=0.5,
-                 som_decay_function=None, som_neighborhood_function='gaussian', som_n_iter = 100,
+                 som_x=10, som_y=10, som_input_len=None, som_sigma=10, som_learning_rate=0.25,
+                 som_decay_function=None, som_neighborhood_function='gaussian', som_n_iter = 1000,
                  random_state =None, soed_tune_percent=0.5):
         """
         Custom Multi-Layer Perceptron (MLP) Classifier with MiniSOM for feature transformation.
@@ -158,6 +158,9 @@ class SOEDClassifier:
                            learning_rate=self.som_learning_rate,
                            neighborhood_function=self.som_neighborhood_function, random_seed=self.som_random_seed)
 
+        self.decide_sr = None
+        self.prob_df = None
+        self.utility_df = None
         self.is_fitted = False
 
     def fit(self, X, y, c=None):
@@ -259,13 +262,6 @@ class SOEDClassifier:
 
         X_train = X[train_index]
         y_mlp_train = y_mlp[train_index]
-        y_train = y[train_index]
-        c_train = c[train_index]
-
-        X_tune = X[tune_index]
-        y_mlp_tune = y_mlp[tune_index]
-        y_tune = y[tune_index]
-        c_tune = c[tune_index]
 
 
         # Train the MLPClassifier
@@ -273,8 +269,8 @@ class SOEDClassifier:
         tune_raw_predict = self.mlp.predict(X)
         tune_predict = (tune_raw_predict-0.5).round(0)
         tune_predict = np.where(tune_predict<0,0,tune_predict)
-        tune_predict[:,0] = np.where(tune_predict[:,0]>self.som_x-1,0,tune_predict[:,0])
-        tune_predict[:,1] = np.where(tune_predict[:,0]>self.som_y-1,0,tune_predict[:,1])
+        tune_predict[:,0] = np.where(tune_predict[:,0]>self.som_x-1,self.som_x-1,tune_predict[:,0])
+        tune_predict[:,1] = np.where(tune_predict[:,1]>self.som_y-1,self.som_y-1,tune_predict[:,1])
 
         df = pd.DataFrame(np.column_stack((tune_predict,y,c)),columns=['X','Y','L','C0','C1'])
 
@@ -304,27 +300,39 @@ class SOEDClassifier:
         mlp_utility_df['utility_0'] = mlp_utility_df['Cost_1']/mlp_utility_df[['Cost_0','Cost_1']].sum(axis=1)
         mlp_utility_df['utility_1'] = mlp_utility_df['Cost_0']/mlp_utility_df[['Cost_0','Cost_1']].sum(axis=1)
 
+        self.utility_df = mlp_utility_df
 
+        mlp_decide_sr = pd.Series(
+            np.where(mlp_utility_df.utility_1 > mlp_utility_df.utility_0,1,0),
+            index = mlp_utility_df.index)
 
+        self.decide_sr = mlp_decide_sr
 
+        mlp_prob_df = df.groupby(['X','Y','L']).size().unstack().fillna(0.0)
 
-        cost_matrix_df = (mlp_cost_df.Cost_1 - mlp_cost_df.Cost_0).unstack()
-        while cost_matrix_df.isna().sum().sum() >0:
-            cost_matrix_df.loc[:,:]=fill_nan_with_weighted_neighbors(cost_matrix_df.values)
+        stage_df = pd.DataFrame(index = my_index, columns=[0.0,1.0])
+        stage_df.update(mlp_prob_df)
 
-        cost_df = pd.DataFrame(np.column_stack((tune_predict,y,c)),columns=['X','Y','L','C0','C1'])
-        cost_df['Cost_0'] = np.where(cost_df.L == 0.0,0.0,cost_df.C0)
-        cost_df['Cost_1'] = np.where(cost_df.L == 1.0,0.0,cost_df.C1)
+        mlp_prob_df = stage_df
 
+        mlp_prob_0_df = mlp_prob_df[0.0].unstack()
+        mlp_prob_1_df = mlp_prob_df[1.0].unstack()
 
-        decide_df = cost_df.groupby(['X','Y'])[['Cost_0','Cost_1']].sum()
-        decide_df = (decide_df.Cost_1<decide_df.Cost_0).rename('class').reset_index().replace({True:1,False:0})
+        while mlp_prob_0_df.isna().sum().sum()>0:
+            mlp_prob_0_df.loc[:,:]=fill_nan_with_weighted_neighbors(mlp_prob_0_df.values)
 
-        prob_df = cost_df.groupby(['X','Y','L']).size().unstack().fillna(0.0)
-        sum_sr = prob_df.sum(axis=1)
+        while mlp_prob_1_df.isna().sum().sum()>0:
+            mlp_prob_1_df.loc[:,:]=fill_nan_with_weighted_neighbors(mlp_prob_1_df.values)
 
-        prob_df[0.0] = prob_df[0.0] / sum_sr
-        prob_df[1.0] = prob_df[1.0] / sum_sr
+        mlp_prob_1_df = (mlp_prob_1_df+som_prob_1_df)/2
+        mlp_prob_0_df = (mlp_prob_0_df+som_prob_0_df)/2
+
+        mlp_porb_df = pd.DataFrame({'prob_0':mlp_prob_0_df.stack(), 'prob_1':mlp_prob_1_df.stack()})
+        som_total_sum_sr = mlp_porb_df.sum(axis=1)
+        mlp_porb_df['prob_0'] = mlp_porb_df['prob_0']/som_total_sum_sr
+        mlp_porb_df['prob_1'] = mlp_porb_df['prob_1']/som_total_sum_sr
+
+        self.prob_df = mlp_porb_df
 
         self.is_fitted = True
         print("Model training complete.")
@@ -345,12 +353,23 @@ class SOEDClassifier:
         if not self.is_fitted:
             raise ValueError("The model has not been fitted yet.")
 
-        # Transform features using MiniSom
-        X_transformed = np.array([self.som.winner(x) for x in X])
-
         # Predict using the trained MLPClassifier
-        y_pred = self.mlp.predict(X_transformed)
-        return y_pred
+        y_pred = self.mlp.predict(X)
+        y_pred = (y_pred-0.5).round(0)
+        y_pred = np.where(y_pred<0,0,y_pred)
+        y_pred[:,0] = np.where(y_pred[:,0]>self.som_x-1,self.som_x-1,y_pred[:,0])
+        y_pred[:,1] = np.where(y_pred[:,1]>self.som_y-1,self.som_y-1,y_pred[:,1])
+
+        output = (
+            self.decide_sr
+            .loc[
+                [(int(y_pred[i][0]),(int(y_pred[i][1]))) for i in range(y_pred.shape[0])]
+                ]
+            .reset_index(drop=True)
+            .values
+        )
+
+        return output
 
     def predict_proba(self, X):
         """
