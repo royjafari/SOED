@@ -3,41 +3,6 @@ import pandas as pd
 from minisom import MiniSom
 from sklearn.neural_network import MLPRegressor
 
-def fill_nan_with_direct_neighbors(matrix):
-    # Ensure the input is a numeric type
-    if not np.issubdtype(matrix.dtype, np.number):
-        matrix = matrix.astype(float)  # Convert to float if needed
-
-    # Create a padded version of the matrix to handle edges
-    padded_matrix = np.pad(matrix, pad_width=1, mode='constant', constant_values=np.nan)
-    rows, cols = matrix.shape
-
-    # Initialize an output matrix
-    filled_matrix = matrix.copy()
-
-    # Define the weights for the 3x3 neighborhood (only direct neighbors have weight)
-    weights = np.array([
-        [0.0, 1.0, 0.0],  # Top row: Direct only (up)
-        [1.0, 0.0, 1.0],  # Middle row: Direct (left, right)
-        [0.0, 1.0, 0.0]   # Bottom row: Direct only (down)
-    ])
-
-    # Iterate over each cell in the original matrix
-    for i in range(rows):
-        for j in range(cols):
-            if np.isnan(matrix[i, j]):  # Only process NaN values
-                # Extract the 3x3 neighborhood
-                neighborhood = padded_matrix[i:i+3, j:j+3]
-
-                # Apply weights and mask valid neighbors
-                weighted_values = neighborhood * weights
-                valid_mask = ~np.isnan(weighted_values)
-
-                # Calculate the weighted average of valid neighbors
-                if np.any(valid_mask):
-                    filled_matrix[i, j] = np.sum(weighted_values[valid_mask]) / np.sum(weights[valid_mask])
-
-    return filled_matrix
 
 def fill_nan_with_weighted_neighbors(matrix):
     # Ensure the input is a numeric type
@@ -134,7 +99,7 @@ class SOEDClassifier:
 
         self.som_x = som_x
         self.som_y = som_y
-        self.som_input_len = som_input_len + 3
+        self.som_input_len = som_input_len + 1
         self.som_sigma = som_sigma
         self.som_learning_rate = som_learning_rate
         self.som_decay_function = som_decay_function
@@ -144,8 +109,6 @@ class SOEDClassifier:
 
         self.seod_tune_percent = soed_tune_percent
 
-        #if self.som_random_seed is None:
-        #    self.som_random_seed = np.random.randint(1000000)
 
         self.mlp = MLPRegressor(hidden_layer_sizes=self.mlp_hidden_layer_sizes, activation=self.mlp_activation,
                                  solver=self.mlp_solver, alpha=self.mlp_alpha, batch_size=self.mlp_batch_size,
@@ -159,6 +122,7 @@ class SOEDClassifier:
                            neighborhood_function=self.som_neighborhood_function, random_seed=self.som_random_seed)
 
         self.decide_sr = None
+        self.predict_sr = None
         self.prob_df = None
         self.utility_df = None
         self.is_fitted = False
@@ -192,7 +156,7 @@ class SOEDClassifier:
         _multiplier = 0
         while _continue:
             _multiplier += 0.25
-            X_som = np.column_stack((X, y*_multiplier,c*_multiplier))
+            X_som = np.column_stack((X, y*_multiplier))
 
             # Train the MiniSom
             self.som.train(X_som, self.som_n_iter)
@@ -228,8 +192,6 @@ class SOEDClassifier:
         som_utility_df['utility_0'] = som_utility_df['Cost_1']/som_utility_df[['Cost_0','Cost_1']].sum(axis=1)
         som_utility_df['utility_1'] = som_utility_df['Cost_0']/som_utility_df[['Cost_0','Cost_1']].sum(axis=1)
 
-        som_decide_sr = pd.Series(np.where(som_utility_df.utility_1 > 0.5,1,0),index = som_utility_df.index)
-
         som_prob_df = df.groupby(['X','Y','L']).size().unstack().fillna(0.0)
 
         stage_df = pd.DataFrame(index = my_index, columns=[0.0,1.0])
@@ -251,14 +213,11 @@ class SOEDClassifier:
         som_porb_df['prob_0'] = som_porb_df['prob_0']/som_total_sum_sr
         som_porb_df['prob_1'] = som_porb_df['prob_1']/som_total_sum_sr
 
-
-
         y_mlp = (df[['X','Y']]+.5).values
 
         random_index = np.random.permutation(X.shape[0])
         i = int(round(X.shape[0]*self.seod_tune_percent))
         train_index = random_index[:i]
-        tune_index = random_index[i+1:]
 
         X_train = X[train_index]
         y_mlp_train = y_mlp[train_index]
@@ -332,6 +291,12 @@ class SOEDClassifier:
         mlp_porb_df['prob_0'] = mlp_porb_df['prob_0']/som_total_sum_sr
         mlp_porb_df['prob_1'] = mlp_porb_df['prob_1']/som_total_sum_sr
 
+        mlp_predict_sr = pd.Series(
+            np.where(mlp_porb_df.prob_1 > mlp_porb_df.prob_0,1,0),
+            index = mlp_utility_df.index)
+
+        self.predict_sr = mlp_predict_sr
+
         self.prob_df = mlp_porb_df
 
         self.is_fitted = True
@@ -361,7 +326,7 @@ class SOEDClassifier:
         y_pred[:,1] = np.where(y_pred[:,1]>self.som_y-1,self.som_y-1,y_pred[:,1])
 
         output = (
-            self.decide_sr
+            self.predict_sr
             .loc[
                 [(int(y_pred[i][0]),(int(y_pred[i][1]))) for i in range(y_pred.shape[0])]
                 ]
@@ -386,32 +351,86 @@ class SOEDClassifier:
         if not self.is_fitted:
             raise ValueError("The model has not been fitted yet.")
 
-        # Transform features using MiniSom
-        X_transformed = np.array([self.som.winner(x) for x in X])
+        y_pred = self.mlp.predict(X)
+        y_pred = (y_pred-0.5).round(0)
+        y_pred = np.where(y_pred<0,0,y_pred)
+        y_pred[:,0] = np.where(y_pred[:,0]>self.som_x-1,self.som_x-1,y_pred[:,0])
+        y_pred[:,1] = np.where(y_pred[:,1]>self.som_y-1,self.som_y-1,y_pred[:,1])
 
-        # Predict probabilities using the trained MLPClassifier
-        proba = self.mlp.predict_proba(X_transformed)
+        proba = (
+            self.prob_df
+            .loc[
+                [(int(y_pred[i][0]),(int(y_pred[i][1]))) for i in range(y_pred.shape[0])]
+                ]
+            .reset_index(drop=True)
+            .values
+        )
+
+
         return proba
 
-    def score(self, X, y):
+
+    def predict_util(self, X):
         """
-        Returns the mean accuracy on the given test data and labels.
+        Utility estimates for samples in X.
 
         Parameters:
         - X: array-like of shape (n_samples, n_features)
-            Test samples.
-        - y: array-like of shape (n_samples,)
-            True labels for X.
+            The input data.
 
         Returns:
-        - score: float
-            Mean accuracy of self.predict(X) wrt. y.
+        - util: array-like of shape (n_samples, n_classes)
+            Utilities estimates.
         """
-        y_pred = self.predict(X)
-        return np.mean(y_pred == y)
+        if not self.is_fitted:
+            raise ValueError("The model has not been fitted yet.")
 
-# Example usage:
-# clf = CustomMLPClassifier(mlp_hidden_layer_sizes=(50, 30), mlp_max_iter=500, som_x=5, som_y=5, som_input_len=4, som_random_seed=42)
-# clf.fit(X_train, y_train)
-# y_pred = clf.predict(X_test)
-# y_proba = clf.predict_proba(X_test)
+        y_pred = self.mlp.predict(X)
+        y_pred = (y_pred-0.5).round(0)
+        y_pred = np.where(y_pred<0,0,y_pred)
+        y_pred[:,0] = np.where(y_pred[:,0]>self.som_x-1,self.som_x-1,y_pred[:,0])
+        y_pred[:,1] = np.where(y_pred[:,1]>self.som_y-1,self.som_y-1,y_pred[:,1])
+
+        util = (
+            self.utility_df[['utility_0','utility_1']]
+            .loc[
+                [(int(y_pred[i][0]),(int(y_pred[i][1]))) for i in range(y_pred.shape[0])]
+                ]
+            .reset_index(drop=True)
+            .values
+        )
+
+        return util
+
+    def decide(self, X):
+        """
+        Predict class labels for samples in X.
+
+        Parameters:
+        - X: array-like of shape (n_samples, n_features)
+            The input data.
+
+        Returns:
+        - y_pred: array-like of shape (n_samples,)
+            Make a decision.
+        """
+        if not self.is_fitted:
+            raise ValueError("The model has not been fitted yet.")
+
+        # Predict using the trained MLPClassifier
+        y_pred = self.mlp.predict(X)
+        y_pred = (y_pred-0.5).round(0)
+        y_pred = np.where(y_pred<0,0,y_pred)
+        y_pred[:,0] = np.where(y_pred[:,0]>self.som_x-1,self.som_x-1,y_pred[:,0])
+        y_pred[:,1] = np.where(y_pred[:,1]>self.som_y-1,self.som_y-1,y_pred[:,1])
+
+        output = (
+            self.decide_sr
+            .loc[
+                [(int(y_pred[i][0]),(int(y_pred[i][1]))) for i in range(y_pred.shape[0])]
+                ]
+            .reset_index(drop=True)
+            .values
+        )
+
+        return output
