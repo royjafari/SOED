@@ -1,7 +1,6 @@
 #!/bin/bash
 
-
-./increaseVersion.ts
+./run.sh && ./increaseVersion.ts
 
 new_version=$(node -p "require('./package.json').version")
 
