@@ -10,6 +10,19 @@ Self Organizing Error Driven Artificial Neural Network
 - Optimum profit-driven churn decision making: innovative artificial neural networks in telecom industry https://link.springer.com/article/10.1007/s00521-020-04850-6
 - Supervised or unsupervised learning? Investigating the role of pattern recognition assumptions in the success of binary predictive prescriptions https://www.sciencedirect.com/science/article/abs/pii/S0925231220319639
 
+## How to work
+```
+pip install soed
+```
+
+```python
+
+from soed import SOEDClassifier
+
+soed = SOEDClassifier(mlp_max_iter=10000,som_x=10, som_y=10,som_input_len=X_train.shape[1])
+
+```
+
 
 ## How to run project
 ```
