@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='soed',
-    version='1.0.2',
+    version='1.0.3',
     packages=find_packages(),
     description='Self Organizing Error Driven Artificial Neural Network',
     long_description=open('Readme.md').read(),
@@ -23,10 +23,15 @@ setup(
     ],
     keywords='machine learning AI Artificial Neural Network',  # Keywords for your package
     install_requires=[
-        'numpy>=2.2.1',
-        'pandas>=2.2.3',
-        'scikit-learn>=1.6.0',
-        'MiniSom>=2.3.3'
+        'numpy==2.2.1',
+        'pandas==2.2.3',
+        'scikit-learn==1.6.0',
+        'MiniSom==2.3.3',
+        "scipy==1.14.1",
+        "python-dateutil==2.9.0.post0",
+        "six==1.17.0",
+        "threadpoolctl==3.5.0",
+        "tzdata==2024.2"
     ],
     project_urls={  # Optional
         'Documentation': 'https://github.com/royjafari/SOED/blob/main/README.md',
