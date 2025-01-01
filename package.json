@@ -1,0 +1,24 @@
+{
+  "name": "soed",
+  "version": "1.0.2",
+  "description": "Self Organizing Error Driven Artificial Neural Network",
+  "main": "index.js",
+  "repository": "git@github.com:royjafari/SOED.git",
+  "author": "Roy Jafari <royxjafari@gmail.com>",
+  "contributors": [
+    "Jason Jafari <me@jasonjafari.com>",
+    "Roy Jafari <royxjafari@gmail.com>"
+  ],
+  "license": "MIT",
+  "private": false,
+  "dependencies": {
+    "husky": "^9.0.11"
+  },
+  "scripts": {
+    "increase-version": "./increaseVersion.ts",
+    "releaseNewVersionAndAddTag": "./releaseNewVersionAndAddTag.sh",
+    "healthy-check": "ls -la",
+    "prepare": "husky install",
+    "test": "./run.sh"
+  }
+}

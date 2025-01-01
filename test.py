@@ -11,7 +11,7 @@ y = np.random.choice([0,1],10000)
 c = np.random.random([10000,2])
 
 
-from main import SOEDClassifier
+from soed import SOEDClassifier
 
 from sklearn.datasets import load_iris
 

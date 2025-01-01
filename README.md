@@ -13,8 +13,8 @@ Self Organizing Error Driven Artificial Neural Network
 
 ## How to run project
 ```
-virtualenv venv
-source venv/bin/activate
+virtualenv soed_dev
+source soed_dev/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -29,4 +29,22 @@ jupyter notebook \
 pip install <package>
 
 pip freeze > requirements.txt
+```
+
+
+
+## for installation in local
+```
+pip install -e .
+```
+
+
+## build project
+```
+python setup.py sdist bdist_wheel
+```
+
+## Push project
+```
+twine upload dist/*
 ```

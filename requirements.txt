@@ -7,6 +7,7 @@ python-dateutil==2.9.0.post0
 pytz==2024.2
 scikit-learn==1.6.0
 scipy==1.14.1
+setuptools==75.6.0
 six==1.17.0
 threadpoolctl==3.5.0
 tzdata==2024.2

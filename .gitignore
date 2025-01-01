@@ -1,4 +1,15 @@
 venv
 soed_dev
 .ipynb_checkpoints
-/gi 
+
+*.pyc
+*.pyo
+__pycache__
+*.egg-info
+dist/
+build/
+
+node_modules
+
+~~
+~~*
