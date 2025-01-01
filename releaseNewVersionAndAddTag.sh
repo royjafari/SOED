@@ -21,5 +21,6 @@ git tag -a "v$new_version" -m "Version $new_version"
 
 git push origin main
 git push origin "v$new_version"
+git tag -a "v$new_version" -m "Release v$new_version"
 
 echo "Version updated to $new_version, committed, and pushed with tag v$new_version"
