@@ -1,6 +1,6 @@
 {
   "name": "soed",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Self Organizing Error Driven Artificial Neural Network",
   "main": "index.js",
   "repository": "git@github.com:royjafari/SOED.git",
