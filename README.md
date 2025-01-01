@@ -61,3 +61,18 @@ python setup.py sdist bdist_wheel
 ```
 twine upload dist/*
 ```
+
+## Release pypi module
+```
+pip install twine
+```
+### Ensure you have pypi credential in
+```
+# nano ~/.pypirc
+[pypi]
+  username = __token__
+  password = <Token>
+```
+```bash
+./releaseNewVersionAndAddTag.sh
+```
