@@ -1,4 +1,5 @@
 import time
+time.sleep(3)
 import numpy as np
 
 from sklearn.metrics import precision_score, recall_score, roc_auc_score, accuracy_score

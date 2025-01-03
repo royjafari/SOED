@@ -47,7 +47,7 @@ class SOEDClassifier:
                  mlp_alpha=0.0001, mlp_batch_size='auto', mlp_learning_rate='constant',
                  mlp_max_iter=200, mlp_tol=1e-4, mlp_verbose=False,
                  mlp_warm_start=False, mlp_n_iter_no_change=10, mlp_beta_1=0.9, mlp_beta_2=0.999, mlp_epsilon=1e-8,
-                 som_x=10, som_y=10, som_input_len=None, som_sigma=10, som_learning_rate=0.25,
+                 som_x=10, som_y=10, som_input_len=None, som_sigma=3, som_learning_rate=0.25,
                  som_decay_function=None, som_neighborhood_function='gaussian', som_n_iter = 1000,
                  random_state =None, soed_tune_percent=0.5):
         """
@@ -99,7 +99,7 @@ class SOEDClassifier:
 
         self.som_x = som_x
         self.som_y = som_y
-        self.som_input_len = som_input_len + 1
+        self.som_input_len = som_input_len + 3
         self.som_sigma = som_sigma
         self.som_learning_rate = som_learning_rate
         self.som_decay_function = som_decay_function
@@ -155,8 +155,8 @@ class SOEDClassifier:
         _continue = True
         _multiplier = 0
         while _continue:
-            _multiplier += 0.25
-            X_som = np.column_stack((X, y*_multiplier))
+            _multiplier += 0.125
+            X_som = np.column_stack((X, y*_multiplier/y.mean(),c*_multiplier/c.mean()))
 
             # Train the MiniSom
             self.som.train(X_som, self.som_n_iter)
