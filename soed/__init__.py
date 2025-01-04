@@ -45,7 +45,7 @@ class SOEDClassifier:
     def __init__(self, 
                  mlp_hidden_layer_sizes=(100,), mlp_activation='relu', mlp_solver='adam',
                  mlp_alpha=0.0001, mlp_batch_size='auto', mlp_learning_rate='constant',
-                 mlp_max_iter=200, mlp_tol=1e-4, mlp_verbose=False,
+                 mlp_max_iter=1000, mlp_tol=1e-4, mlp_verbose=False,
                  mlp_warm_start=False, mlp_n_iter_no_change=10, mlp_beta_1=0.9, mlp_beta_2=0.999, mlp_epsilon=1e-8,
                  som_x=10, som_y=10, som_input_len=None, som_sigma=3, som_learning_rate=0.25,
                  som_decay_function=None, som_neighborhood_function='gaussian', som_n_iter = 1000,
@@ -146,17 +146,22 @@ class SOEDClassifier:
 
         if c is None:
             c = np.ones([X.shape[0],2])
+            c_standard = c
+        else:
+            c_standard = (c - c.min())/(c.max()-c.min())
 
         assert X.shape[0] == y.shape[0], 'X and y must be of the same length.'
         assert X.shape[0] == c.shape[0], 'X and c must be of the same length.'
         assert c.shape[1] == 2, 'c must have two columns.'
         assert np.isin(y, [0, 1]).all(), 'y can only have binary values.'
 
+
+
         _continue = True
         _multiplier = 0
         while _continue:
             _multiplier += 0.125
-            X_som = np.column_stack((X, y*_multiplier/y.mean(),c*_multiplier/c.mean()))
+            X_som = np.column_stack((X, y*_multiplier,c_standard*_multiplier))
 
             # Train the MiniSom
             self.som.train(X_som, self.som_n_iter)

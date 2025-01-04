@@ -6,6 +6,7 @@ from sklearn.metrics import precision_score, recall_score, roc_auc_score, accura
 from soed import SOEDClassifier
 from sklearn.datasets import load_iris
 
+
 try:
 
     print('starting test 1.')
