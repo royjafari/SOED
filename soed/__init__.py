@@ -152,6 +152,9 @@ class SOEDClassifier:
         assert c.shape[1] == 2, 'c must have two columns.'
         assert np.isin(y, [0, 1]).all(), 'y can only have binary values.'
 
+        y_standard = (y - y.min())/(y.max()-y.min())
+        c_standard = (c - c.min())/(c.max()-c.min())
+
         _continue = True
         _multiplier = 0
         while _continue:
