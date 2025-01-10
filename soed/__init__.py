@@ -3,7 +3,6 @@ import pandas as pd
 from minisom import MiniSom
 from sklearn.neural_network import MLPRegressor
 
-
 def fill_nan_with_weighted_neighbors(matrix):
     # Ensure the input is a numeric type
     if not np.issubdtype(matrix.dtype, np.number):
@@ -80,7 +79,7 @@ class SOEDClassifier:
             - som_neighborhood_function: {'gaussian', 'mexican_hat'}, default='gaussian'
         """
 
-        assert type(som_input_len)==int, 'som_input_len needs to be integer.'
+        #assert type(som_input_len)==int, 'som_input_len needs to be integer.'
         self.mlp_hidden_layer_sizes = mlp_hidden_layer_sizes
         self.mlp_activation = mlp_activation
         self.mlp_solver = mlp_solver
@@ -99,7 +98,6 @@ class SOEDClassifier:
 
         self.som_x = som_x
         self.som_y = som_y
-        self.som_input_len = som_input_len + 3
         self.som_sigma = som_sigma
         self.som_learning_rate = som_learning_rate
         self.som_decay_function = som_decay_function
@@ -117,15 +115,12 @@ class SOEDClassifier:
                                  warm_start=self.mlp_warm_start, n_iter_no_change=self.mlp_n_iter_no_change,
                                  beta_1=self.mlp_beta_1, beta_2=self.mlp_beta_2, epsilon=self.mlp_epsilon)
 
-        self.som = MiniSom(self.som_x, self.som_y, self.som_input_len, sigma=self.som_sigma,
-                           learning_rate=self.som_learning_rate,
-                           neighborhood_function=self.som_neighborhood_function, random_seed=self.som_random_seed)
-
         self.decide_sr = None
         self.predict_sr = None
         self.prob_df = None
         self.utility_df = None
         self.is_fitted = False
+        print('version 1.0.7')
 
     def fit(self, X, y, c=None):
         """
@@ -155,13 +150,46 @@ class SOEDClassifier:
         assert c.shape[1] == 2, 'c must have two columns.'
         assert np.isin(y, [0, 1]).all(), 'y can only have binary values.'
 
+        X_df = pd.DataFrame(X)
 
+        corr_matrix = X_df.corr().abs()
+
+        upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        to_drop = [column for column in upper_tri.columns if any(upper_tri[column] > 0.9)]
+
+        rang_df = (X_df.max()-X_df.min())
+        to_drop2 = rang_df[rang_df == 0].index.tolist()
+        to_drop.extend(to_drop2)
+
+        X_select = X_df.drop(columns=to_drop).values
+
+        X_select_standard = (X_select - X_select.min(axis=0))/(X_select.max(axis=0) - X_select.min(axis=0))
+
+
+        #X_standard = np.nan_to_num((X - X.mean(axis=0))/X.std(axis=0),0.0)
+        #pca = PCA(n_components=X.shape[1])  # Reduce to 7 dimensions
+        #X_pca = pd.DataFrame(pca.fit_transform(X_standard),columns = [f'PC{i}' for i in range(1,X.shape[1]+1)])
+
+        #explained_variance_ratio = pca.explained_variance_ratio_
+        #cumulative_explained_variance = np.cumsum(explained_variance_ratio)
+
+        #n_dimensions = min(
+        #    (cumulative_explained_variance<0.9).sum()+1,
+        #    X.shape[0]
+        #)
+        #X_pca_select = X_pca[[f'PC{i}' for i in range(1,n_dimensions+1)]]
+
+
+
+        self.som = MiniSom(self.som_x, self.som_y, X_select.shape[1]+3, sigma=self.som_sigma,
+                           learning_rate=self.som_learning_rate,
+                           neighborhood_function=self.som_neighborhood_function, random_seed=self.som_random_seed)
 
         _continue = True
-        _multiplier = 0
+        _multiplier = -0.125
         while _continue:
             _multiplier += 0.125
-            X_som = np.column_stack((X, y*_multiplier,c_standard*_multiplier))
+            X_som = np.column_stack((X_select_standard, y*_multiplier,c_standard*_multiplier))
 
             # Train the MiniSom
             self.som.train(X_som, self.som_n_iter)
