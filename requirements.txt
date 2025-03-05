@@ -34,3 +34,4 @@ threadpoolctl==3.5.0
 twine==6.0.1
 tzdata==2024.2
 urllib3==2.3.0
+xgboost==2.1.4

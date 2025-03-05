@@ -1,6 +1,7 @@
 import time
-time.sleep(3)
+time.sleep(5)
 import numpy as np
+import pandas as pd
 
 from sklearn.metrics import precision_score, recall_score, roc_auc_score, accuracy_score
 from soed import SOEDClassifier
@@ -15,14 +16,14 @@ try:
     y = np.random.choice([0,1],10000)
     c = np.random.random([10000,2])
 
-    soed = SOEDClassifier(som_input_len=X.shape[1])
+    soed = SOEDClassifier()
 
     soed.fit(X,y,c)
 
     y_proba = soed.predict_proba(X)
     y_pred = soed.predict(X)
 
-    y_util = soed.predict_util(X)
+    y_util = soed.decide_util(X)
     y_decide = soed.decide(X)
 
 
@@ -55,15 +56,15 @@ try:
 
     y = np.where(y==2,0,y)
 
-    X_standard = (X-X.min(axis=0))/(X.max(axis=0) - X.min(axis=0))
+    #X_standard = (X-X.min(axis=0))/(X.max(axis=0) - X.min(axis=0))
 
     random_index = np.random.permutation(X.shape[0])
     i = int(round(X.shape[0]*0.5))
     train_index = random_index[:i]
     test_index = random_index[i+1:]
 
-    X_train = X_standard[train_index]
-    X_test = X_standard[test_index]
+    X_train = X[train_index]
+    X_test = X[test_index]
 
     y_train = y[train_index]
     y_test = y[test_index]
@@ -76,14 +77,14 @@ try:
 
 
 
-    soed = SOEDClassifier(mlp_max_iter=10000,som_x=10, som_y=10,som_input_len=X_train.shape[1])
+    soed = SOEDClassifier(mlp_max_iter=10000,som_x=10, som_y=10)
 
     soed.fit(X_train,y_train,c)
 
     y_proba = soed.predict_proba(X_test)
     y_pred = soed.predict(X_test)
 
-    y_util = soed.predict_util(X_test)
+    y_util = soed.decide_util(X_test)
     y_decide = soed.decide(X_test)
 
 
