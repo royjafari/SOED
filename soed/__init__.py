@@ -2,6 +2,11 @@ import numpy as np
 import pandas as pd
 from minisom import MiniSom
 from sklearn.neural_network import MLPRegressor
+from xgboost import XGBRegressor
+from sklearn.multioutput import MultiOutputRegressor
+
+model = MultiOutputRegressor(XGBRegressor())
+
 
 def fill_nan_with_weighted_neighbors(matrix):
     # Ensure the input is a numeric type
@@ -48,6 +53,8 @@ class SOEDClassifier:
                  mlp_warm_start=False, mlp_n_iter_no_change=10, mlp_beta_1=0.9, mlp_beta_2=0.999, mlp_epsilon=1e-8,
                  som_x=10, som_y=10, som_input_len=None, som_sigma=3, som_learning_rate=0.25,
                  som_decay_function=None, som_neighborhood_function='gaussian', som_n_iter = 1000,
+                 xgb_n_estimators=500, xgb_max_depth=100, xgb_learning_rate=0.1, xgb_subsample=0.8, xgb_colsample_bytree=0.8,
+                 xgb_gamma=0, xgb_reg_alpha=0, xgb_reg_lambda=1, xgb_random_state=None,
                  random_state =None, soed_tune_percent=0.5):
         """
         Custom Multi-Layer Perceptron (MLP) Classifier with MiniSOM for feature transformation.
@@ -105,6 +112,17 @@ class SOEDClassifier:
         self.som_random_seed = random_state
         self.som_n_iter = som_n_iter
 
+        # XGBoost Parameters
+        self.xgb_n_estimators = xgb_n_estimators
+        self.xgb_max_depth = xgb_max_depth
+        self.xgb_learning_rate = xgb_learning_rate
+        self.xgb_subsample = xgb_subsample
+        self.xgb_colsample_bytree = xgb_colsample_bytree
+        self.xgb_gamma = xgb_gamma
+        self.xgb_reg_alpha = xgb_reg_alpha
+        self.xgb_reg_lambda = xgb_reg_lambda
+        self.xgb_random_state = xgb_random_state
+
         self.seod_tune_percent = soed_tune_percent
 
 
@@ -115,12 +133,29 @@ class SOEDClassifier:
                                  warm_start=self.mlp_warm_start, n_iter_no_change=self.mlp_n_iter_no_change,
                                  beta_1=self.mlp_beta_1, beta_2=self.mlp_beta_2, epsilon=self.mlp_epsilon)
 
+
+        params = {
+            "objective": "reg:squarederror",  # For regression task
+            "booster": "gbtree",  # Tree boosting
+            "learning_rate": self.xgb_learning_rate,  # Step size at each iteration
+            "max_depth": self.xgb_max_depth,  # Maximum depth of a tree
+            "n_estimators": self.xgb_n_estimators,  # Number of trees
+            "subsample": self.xgb_subsample,  # Subsample ratio of the training set
+            "colsample_bytree": self.xgb_colsample_bytree,  # Subsample ratio of columns when constructing each tree
+            "gamma": self.xgb_gamma,  # Minimum loss reduction required to make a further partition
+            "reg_alpha": self.xgb_reg_alpha,  # L1 regularization term on weights
+            "reg_lambda": self.xgb_reg_lambda,  # L2 regularization term on weights
+        }
+
+        xgb_model = XGBRegressor(**params)
+        self.xgb = MultiOutputRegressor(xgb_model)
+
         self.decide_sr = None
         self.predict_sr = None
         self.prob_df = None
         self.utility_df = None
         self.is_fitted = False
-        print('version 1.0.7')
+        print('version 1.0.8')
 
     def fit(self, X, y, c=None):
         """
@@ -207,7 +242,7 @@ class SOEDClassifier:
         som_cost_df = som_cost_df.groupby(['X','Y'])[['Cost_0','Cost_1']].sum()
 
         my_index = pd.MultiIndex.from_product([np.arange(self.som_x),np.arange(self.som_y)],names=['X','Y'])
-        stage_df = pd.DataFrame(index = my_index, columns=['Cost_0','Cost_1'])
+        stage_df = pd.DataFrame(0.01,index = my_index, columns=['Cost_0','Cost_1'])
         stage_df.update(som_cost_df)
 
         som_cost_df = stage_df
@@ -246,19 +281,19 @@ class SOEDClassifier:
         som_porb_df['prob_0'] = som_porb_df['prob_0']/som_total_sum_sr
         som_porb_df['prob_1'] = som_porb_df['prob_1']/som_total_sum_sr
 
-        y_mlp = (df[['X','Y']]+.5).values
+        y_supervised = (df[['X','Y']]+0.5).values
 
         random_index = np.random.permutation(X.shape[0])
         i = int(round(X.shape[0]*self.seod_tune_percent))
         train_index = random_index[:i]
 
         X_train = X[train_index]
-        y_mlp_train = y_mlp[train_index]
+        y_supervised_train = y_supervised[train_index]
 
 
         # Train the MLPClassifier
-        self.mlp.fit(X_train, y_mlp_train)
-        tune_raw_predict = self.mlp.predict(X)
+        self.xgb.fit(X_train, y_supervised_train)
+        tune_raw_predict = self.xgb.predict(X)
         tune_predict = (tune_raw_predict-0.5).round(0)
         tune_predict = np.where(tune_predict<0,0,tune_predict)
         tune_predict[:,0] = np.where(tune_predict[:,0]>self.som_x-1,self.som_x-1,tune_predict[:,0])
@@ -266,71 +301,71 @@ class SOEDClassifier:
 
         df = pd.DataFrame(np.column_stack((tune_predict,y,c)),columns=['X','Y','L','C0','C1'])
 
-        mlp_cost_df = df.copy(deep=True)
-        mlp_cost_df['Cost_0'] = np.where(mlp_cost_df.L == 0.0,0.0,mlp_cost_df.C0)
-        mlp_cost_df['Cost_1'] = np.where(mlp_cost_df.L == 1.0,0.0,mlp_cost_df.C1)
+        xgb_cost_df = df.copy(deep=True)
+        xgb_cost_df['Cost_0'] = np.where(xgb_cost_df.L == 0.0,0.0,xgb_cost_df.C0)
+        xgb_cost_df['Cost_1'] = np.where(xgb_cost_df.L == 1.0,0.0,xgb_cost_df.C1)
 
-        mlp_cost_df = mlp_cost_df.groupby(['X','Y'])[['Cost_0','Cost_1']].sum()
+        xgb_cost_df = xgb_cost_df.groupby(['X','Y'])[['Cost_0','Cost_1']].sum()
 
         stage_df = pd.DataFrame(index = my_index, columns=['Cost_0','Cost_1'])
-        stage_df.update(mlp_cost_df)
+        stage_df.update(xgb_cost_df)
 
-        mlp_cost_df = stage_df
+        xgb_cost_df = stage_df
 
-        mlp_cost_0_df = mlp_cost_df['Cost_0'].unstack()
-        mlp_cost_1_df = mlp_cost_df['Cost_1'].unstack()
+        xgb_cost_0_df = xgb_cost_df['Cost_0'].unstack()
+        xgb_cost_1_df = xgb_cost_df['Cost_1'].unstack()
 
-        while mlp_cost_0_df.isna().sum().sum()>0:
-            mlp_cost_0_df.loc[:,:]=fill_nan_with_weighted_neighbors(mlp_cost_0_df.values)
+        while xgb_cost_0_df.isna().sum().sum()>0:
+            xgb_cost_0_df.loc[:,:]=fill_nan_with_weighted_neighbors(xgb_cost_0_df.values)
 
-        while mlp_cost_1_df.isna().sum().sum()>0:
-            mlp_cost_1_df.loc[:,:]=fill_nan_with_weighted_neighbors(mlp_cost_1_df.values)
+        while xgb_cost_1_df.isna().sum().sum()>0:
+            xgb_cost_1_df.loc[:,:]=fill_nan_with_weighted_neighbors(xgb_cost_1_df.values)
 
-        mlp_cost_0_df = (mlp_cost_0_df + som_cost_0_df)/2
-        mlp_cost_1_df = (mlp_cost_1_df + som_cost_1_df)/2
-        mlp_utility_df = pd.DataFrame({'Cost_0':mlp_cost_0_df.stack(), 'Cost_1':mlp_cost_1_df.stack()})
-        mlp_utility_df['utility_0'] = mlp_utility_df['Cost_1']/mlp_utility_df[['Cost_0','Cost_1']].sum(axis=1)
-        mlp_utility_df['utility_1'] = mlp_utility_df['Cost_0']/mlp_utility_df[['Cost_0','Cost_1']].sum(axis=1)
+        xgb_cost_0_df = (xgb_cost_0_df + som_cost_0_df)/2
+        xgb_cost_1_df = (xgb_cost_1_df + som_cost_1_df)/2
+        xgb_utility_df = pd.DataFrame({'Cost_0':xgb_cost_0_df.stack(), 'Cost_1':xgb_cost_1_df.stack()})
+        xgb_utility_df['utility_0'] = xgb_utility_df['Cost_1']/xgb_utility_df[['Cost_0','Cost_1']].sum(axis=1)
+        xgb_utility_df['utility_1'] = xgb_utility_df['Cost_0']/xgb_utility_df[['Cost_0','Cost_1']].sum(axis=1)
 
-        self.utility_df = mlp_utility_df
+        self.utility_df = xgb_utility_df
 
-        mlp_decide_sr = pd.Series(
-            np.where(mlp_utility_df.utility_1 > mlp_utility_df.utility_0,1,0),
-            index = mlp_utility_df.index)
+        xgb_decide_sr = pd.Series(
+            np.where(xgb_utility_df.utility_1 > xgb_utility_df.utility_0,1,0),
+            index = xgb_utility_df.index)
 
-        self.decide_sr = mlp_decide_sr
+        self.decide_sr = xgb_decide_sr
 
-        mlp_prob_df = df.groupby(['X','Y','L']).size().unstack().fillna(0.0)
+        xgb_prob_df = df.groupby(['X','Y','L']).size().unstack().fillna(0.0)
 
         stage_df = pd.DataFrame(index = my_index, columns=[0.0,1.0])
-        stage_df.update(mlp_prob_df)
+        stage_df.update(xgb_prob_df)
 
-        mlp_prob_df = stage_df
+        xgb_prob_df = stage_df
 
-        mlp_prob_0_df = mlp_prob_df[0.0].unstack()
-        mlp_prob_1_df = mlp_prob_df[1.0].unstack()
+        xgb_prob_0_df = xgb_prob_df[0.0].unstack()
+        xgb_prob_1_df = xgb_prob_df[1.0].unstack()
 
-        while mlp_prob_0_df.isna().sum().sum()>0:
-            mlp_prob_0_df.loc[:,:]=fill_nan_with_weighted_neighbors(mlp_prob_0_df.values)
+        while xgb_prob_0_df.isna().sum().sum()>0:
+            xgb_prob_0_df.loc[:,:]=fill_nan_with_weighted_neighbors(xgb_prob_0_df.values)
 
-        while mlp_prob_1_df.isna().sum().sum()>0:
-            mlp_prob_1_df.loc[:,:]=fill_nan_with_weighted_neighbors(mlp_prob_1_df.values)
+        while xgb_prob_1_df.isna().sum().sum()>0:
+            xgb_prob_1_df.loc[:,:]=fill_nan_with_weighted_neighbors(xgb_prob_1_df.values)
 
-        mlp_prob_1_df = (mlp_prob_1_df+som_prob_1_df)/2
-        mlp_prob_0_df = (mlp_prob_0_df+som_prob_0_df)/2
+        xgb_prob_1_df = (xgb_prob_1_df+som_prob_1_df)/2
+        xgb_prob_0_df = (xgb_prob_0_df+som_prob_0_df)/2
 
-        mlp_porb_df = pd.DataFrame({'prob_0':mlp_prob_0_df.stack(), 'prob_1':mlp_prob_1_df.stack()})
-        som_total_sum_sr = mlp_porb_df.sum(axis=1)
-        mlp_porb_df['prob_0'] = mlp_porb_df['prob_0']/som_total_sum_sr
-        mlp_porb_df['prob_1'] = mlp_porb_df['prob_1']/som_total_sum_sr
+        xgb_porb_df = pd.DataFrame({'prob_0':xgb_prob_0_df.stack(), 'prob_1':xgb_prob_1_df.stack()})
+        xgb_total_sum_sr = xgb_porb_df.sum(axis=1)
+        xgb_porb_df['prob_0'] = xgb_porb_df['prob_0']/xgb_total_sum_sr
+        xgb_porb_df['prob_1'] = xgb_porb_df['prob_1']/xgb_total_sum_sr
 
-        mlp_predict_sr = pd.Series(
-            np.where(mlp_porb_df.prob_1 > mlp_porb_df.prob_0,1,0),
-            index = mlp_utility_df.index)
+        xgb_predict_sr = pd.Series(
+            np.where(xgb_porb_df.prob_1 > xgb_porb_df.prob_0,1,0),
+            index = xgb_utility_df.index)
 
-        self.predict_sr = mlp_predict_sr
+        self.predict_sr = xgb_predict_sr
 
-        self.prob_df = mlp_porb_df
+        self.prob_df = xgb_porb_df
 
         self.is_fitted = True
         print("Model training complete.")
@@ -352,7 +387,7 @@ class SOEDClassifier:
             raise ValueError("The model has not been fitted yet.")
 
         # Predict using the trained MLPClassifier
-        y_pred = self.mlp.predict(X)
+        y_pred = self.xgb.predict(X)
         y_pred = (y_pred-0.5).round(0)
         y_pred = np.where(y_pred<0,0,y_pred)
         y_pred[:,0] = np.where(y_pred[:,0]>self.som_x-1,self.som_x-1,y_pred[:,0])
@@ -384,7 +419,7 @@ class SOEDClassifier:
         if not self.is_fitted:
             raise ValueError("The model has not been fitted yet.")
 
-        y_pred = self.mlp.predict(X)
+        y_pred = self.xgb.predict(X)
         y_pred = (y_pred-0.5).round(0)
         y_pred = np.where(y_pred<0,0,y_pred)
         y_pred[:,0] = np.where(y_pred[:,0]>self.som_x-1,self.som_x-1,y_pred[:,0])
@@ -403,7 +438,7 @@ class SOEDClassifier:
         return proba
 
 
-    def predict_util(self, X):
+    def decide_util(self, X):
         """
         Utility estimates for samples in X.
 
@@ -418,7 +453,7 @@ class SOEDClassifier:
         if not self.is_fitted:
             raise ValueError("The model has not been fitted yet.")
 
-        y_pred = self.mlp.predict(X)
+        y_pred = self.xgb.predict(X)
         y_pred = (y_pred-0.5).round(0)
         y_pred = np.where(y_pred<0,0,y_pred)
         y_pred[:,0] = np.where(y_pred[:,0]>self.som_x-1,self.som_x-1,y_pred[:,0])
@@ -451,7 +486,7 @@ class SOEDClassifier:
             raise ValueError("The model has not been fitted yet.")
 
         # Predict using the trained MLPClassifier
-        y_pred = self.mlp.predict(X)
+        y_pred = self.xgb.predict(X)
         y_pred = (y_pred-0.5).round(0)
         y_pred = np.where(y_pred<0,0,y_pred)
         y_pred[:,0] = np.where(y_pred[:,0]>self.som_x-1,self.som_x-1,y_pred[:,0])

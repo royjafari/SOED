@@ -1,6 +1,7 @@
 import time
 time.sleep(5)
 import numpy as np
+import pandas as pd
 
 from sklearn.metrics import precision_score, recall_score, roc_auc_score, accuracy_score
 from soed import SOEDClassifier
@@ -22,7 +23,7 @@ try:
     y_proba = soed.predict_proba(X)
     y_pred = soed.predict(X)
 
-    y_util = soed.predict_util(X)
+    y_util = soed.decide_util(X)
     y_decide = soed.decide(X)
 
 
@@ -83,7 +84,7 @@ try:
     y_proba = soed.predict_proba(X_test)
     y_pred = soed.predict(X_test)
 
-    y_util = soed.predict_util(X_test)
+    y_util = soed.decide_util(X_test)
     y_decide = soed.decide(X_test)
 
 
