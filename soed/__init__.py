@@ -155,7 +155,7 @@ class SOEDClassifier:
         self.prob_df = None
         self.utility_df = None
         self.is_fitted = False
-        print('version 1.0.8')
+        print('version 1.0.9')
 
     def fit(self, X, y, c=None):
         """
@@ -257,6 +257,12 @@ class SOEDClassifier:
             som_cost_1_df.loc[:,:]=fill_nan_with_weighted_neighbors(som_cost_1_df.values)
 
         som_utility_df = pd.DataFrame({'Cost_0':som_cost_0_df.stack(), 'Cost_1':som_cost_1_df.stack()})
+        BM = (som_utility_df.Cost_0 == 0) & (som_utility_df.Cost_1==0)
+        if BM.sum()>0:
+            for i in som_utility_df[BM].index:
+                som_utility_df.loc[i,'Cost_0'] = 0.000001
+                som_utility_df.loc[i,'Cost_1'] = 0.000001
+
         som_utility_df['utility_0'] = som_utility_df['Cost_1']/som_utility_df[['Cost_0','Cost_1']].sum(axis=1)
         som_utility_df['utility_1'] = som_utility_df['Cost_0']/som_utility_df[['Cost_0','Cost_1']].sum(axis=1)
 
@@ -324,6 +330,11 @@ class SOEDClassifier:
         xgb_cost_0_df = (xgb_cost_0_df + som_cost_0_df)/2
         xgb_cost_1_df = (xgb_cost_1_df + som_cost_1_df)/2
         xgb_utility_df = pd.DataFrame({'Cost_0':xgb_cost_0_df.stack(), 'Cost_1':xgb_cost_1_df.stack()})
+        BM = (xgb_utility_df.Cost_0 == 0) & (xgb_utility_df.Cost_1==0)
+        if BM.sum()>0:
+            for i in xgb_utility_df[BM].index:
+                xgb_utility_df.loc[i,'Cost_0'] = 0.000001
+                xgb_utility_df.loc[i,'Cost_1'] = 0.000001
         xgb_utility_df['utility_0'] = xgb_utility_df['Cost_1']/xgb_utility_df[['Cost_0','Cost_1']].sum(axis=1)
         xgb_utility_df['utility_1'] = xgb_utility_df['Cost_0']/xgb_utility_df[['Cost_0','Cost_1']].sum(axis=1)
 
